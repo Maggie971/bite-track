@@ -36,18 +36,12 @@ export default function Landing() {
   };
 
   return (
-    // ✅ 关键修复：去掉 overflow-hidden！
-    // overflow-hidden 会把所有 fixed 子元素裁切掉，导致聊天框在全屏时不可见
-    // 背景装饰改用独立 fixed 层来实现，不再依赖父容器裁切
     <div className="min-h-screen bg-white flex flex-col font-sans text-gray-900 relative">
-
-      {/* 装饰性背景：改为 fixed 独立层，完全不影响任何子元素布局 */}
       <div className="fixed top-0 left-0 w-full h-full -z-10 pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-50 rounded-full blur-3xl opacity-50" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-amber-50 rounded-full blur-3xl opacity-50" />
       </div>
 
-      {/* ✅ 留白修复：max-w-5xl → max-w-7xl */}
       <nav className="w-full border-b border-gray-50/50 backdrop-blur">
         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="font-extrabold text-2xl text-blue-600 tracking-tight">FoodAgent</div>
@@ -73,7 +67,6 @@ export default function Landing() {
         <p className="text-xl text-gray-500 mb-12 max-w-2xl">
           Search for top-rated spots, or click the ✨ icon to chat with your AI expert and get personalized recommendations based on photos or cravings.
         </p>
-        {/* 搜索框保持适中宽度，视觉上更聚焦 */}
         <div className="w-full max-w-3xl">
           <SearchBar
             searchQuery={searchQuery} setSearchQuery={setSearchQuery}
@@ -86,7 +79,12 @@ export default function Landing() {
         </div>
       </main>
 
-      <ChatWindow {...chat} />
+      <ChatWindow
+        {...chat}
+        userId={isSignedIn ? user?.id : 'guest'}
+        loadSession={chat.loadSession}
+        startNewSession={chat.startNewSession}
+      />
       <ChatFab isChatOpen={chat.isChatOpen} setIsChatOpen={chat.setIsChatOpen} />
     </div>
   );

@@ -25,9 +25,7 @@ export default function Results() {
   });
 
   return (
-    // ✅ 关键修复：去掉 overflow-hidden！原因同 Landing.jsx
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
-
       <header className="bg-white border-b px-6 py-4 flex items-center sticky top-0 z-10 shadow-sm shrink-0">
         <button onClick={() => navigate('/')} className="p-2 hover:bg-gray-100 rounded-full transition-colors mr-4">
           <ArrowLeft size={20} />
@@ -38,7 +36,6 @@ export default function Results() {
         </div>
       </header>
 
-      {/* 主体容器也不要 overflow-hidden */}
       <div className="flex-grow flex flex-col md:flex-row w-full h-[calc(100vh-73px)]">
         <RestaurantList
           sortedRestaurants={sortedRestaurants}
@@ -61,6 +58,9 @@ export default function Results() {
       <ChatWindow
         {...chat}
         inputPlaceholder={selectedRestaurant ? `Ask about ${selectedRestaurant.displayName?.text}...` : "Ask me anything..."}
+        userId={isSignedIn ? user?.id : 'guest'}
+        loadSession={chat.loadSession}
+        startNewSession={chat.startNewSession}
       />
       <ChatFab isChatOpen={chat.isChatOpen} setIsChatOpen={chat.setIsChatOpen} />
     </div>
