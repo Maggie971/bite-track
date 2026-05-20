@@ -44,7 +44,7 @@ export default function Landing() {
 
       <nav className="w-full border-b border-gray-50/50 backdrop-blur">
         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-          <div className="font-extrabold text-2xl text-blue-600 tracking-tight">FoodAgent</div>
+          <div className="font-extrabold text-2xl text-blue-600 tracking-tight">BiteTrack</div>
           <div className="flex items-center">
             <SignedOut>
               <SignInButton mode="modal">
@@ -62,10 +62,10 @@ export default function Landing() {
 
       <main className="flex-grow flex flex-col items-center justify-center px-4 pt-16 pb-24 text-center z-10">
         <h1 className="text-6xl md:text-7xl font-extrabold tracking-tight mb-6 text-gray-900">
-          Find your <span className="text-blue-600">favorites.</span>
+        Your personal  <span className="text-blue-600">food AI.</span>
         </h1>
         <p className="text-xl text-gray-500 mb-12 max-w-2xl">
-          Search for top-rated spots, or click the ✨ icon to chat with your AI expert and get personalized recommendations based on photos or cravings.
+        Snap a photo, describe a craving, or ask anything — BiteTrack remembers your taste and guides every meal.
         </p>
         <div className="w-full max-w-3xl">
           <SearchBar
@@ -84,6 +84,7 @@ export default function Landing() {
         userId={isSignedIn ? user?.id : 'guest'}
         loadSession={chat.loadSession}
         startNewSession={chat.startNewSession}
+        handleCloseChatWithSummary={chat.handleCloseChatWithSummary}
       />
       <ChatFab isChatOpen={chat.isChatOpen} setIsChatOpen={chat.setIsChatOpen} />
     </div>

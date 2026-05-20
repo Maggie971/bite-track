@@ -61,6 +61,7 @@ export default function Results() {
         userId={isSignedIn ? user?.id : 'guest'}
         loadSession={chat.loadSession}
         startNewSession={chat.startNewSession}
+        handleCloseChatWithSummary={chat.handleCloseChatWithSummary}
       />
       <ChatFab isChatOpen={chat.isChatOpen} setIsChatOpen={chat.setIsChatOpen} />
     </div>

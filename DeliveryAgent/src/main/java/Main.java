@@ -1,44 +1,37 @@
-import io.javalin.Javalin;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import dev.langchain4j.service.AiServices;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.service.TokenStream;
-
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
-import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
-import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.embedding.onnx.bgesmallenv15q.BgeSmallEnV15QuantizedEmbeddingModel;
-
-import dev.langchain4j.store.embedding.EmbeddingStore;
-import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
-import dev.langchain4j.rag.content.retriever.ContentRetriever;
-import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
-
-import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Sorts;
-import org.bson.Document;
-
-import okhttp3.OkHttpClient;
-
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.bson.Document;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
+
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.onnx.bgesmallenv15q.BgeSmallEnV15QuantizedEmbeddingModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
+import dev.langchain4j.rag.content.retriever.ContentRetriever;
+import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
+import dev.langchain4j.service.AiServices;
+import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
+import io.javalin.Javalin;
 
 public class Main {
 
@@ -194,6 +187,49 @@ public class Main {
             } catch (Exception e) { ctx.json(List.of()); }
         });
 
+        app.post("/api/conversations/summarize", ctx -> {
+            try {
+                JsonNode json = mapper.readTree(ctx.body());
+                String userId = json.get("userId").asText();
+                String sessionId = json.get("sessionId").asText();
+        
+                // 跳过条件：guest、没有用户消息、已经生成过摘要
+                if (userId.equals("guest")
+                        || !conversationService.hasUserMessages(sessionId)
+                        || conversationService.hasSummary(sessionId)) {
+                    ctx.result("skipped");
+                    return;
+                }
+        
+                // 异步生成摘要，不阻塞响应
+                ctx.result("ok");
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        String convText = conversationService.getConversationText(sessionId);
+                        if (convText.isBlank()) return;
+        
+                        // 用 ImageAnalysisService 里的 Gemini 同步调用生成摘要
+                        String summary = imageService.generateConversationSummary(userId, convText);
+                        if (summary == null || summary.isBlank()) return;
+        
+                        // 存进向量库，RAG 下次检索时能捞到
+                        String memoryText = "Conversation Summary [ID: " + userId + "] ["
+                                + LocalDateTime.now().toLocalDate() + "]: " + summary;
+                        var embedding = embeddingModel.embed(memoryText).content();
+                        embeddingStore.add(embedding, TextSegment.from(memoryText));
+        
+                        // 标记已摘要
+                        conversationService.markSummarized(sessionId);
+                        System.out.println("📝 [SUMMARY SAVED] " + memoryText);
+                    } catch (Exception e) {
+                        System.err.println("[SUMMARY ERROR] " + e.getMessage());
+                    }
+                });
+            } catch (Exception e) {
+                ctx.status(500).result("error");
+            }
+        });
+
         // 主聊天
         app.post("/api/chat", ctx -> {
             try {
@@ -298,5 +334,7 @@ public class Main {
                 ctx.status(500).result("Error!");
             }
         });
+
+        
     }
 }

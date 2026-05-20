@@ -2,7 +2,6 @@ import { useState, useRef } from 'react';
 
 const API = 'http://localhost:8080';
 
-// ✅ 每次调用都生成唯一 sessionId，用时间戳区分
 function generateSessionId(userId) {
   const ts = Date.now();
   return `${userId}_${ts}`;
@@ -14,21 +13,31 @@ async function saveMessage(userId, sessionId, role, text) {
     await fetch(`${API}/api/conversations/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        sessionId,
-        role,
-        text,
-        timestamp: new Date().toISOString(),
-      })
+      body: JSON.stringify({ userId, sessionId, role, text, timestamp: new Date().toISOString() })
     });
+  } catch (e) {}
+}
+
+// ✅ 触发摘要，三个地方都会调这个
+async function triggerSummary(userId, sessionId) {
+  if (!userId || userId === 'guest' || !sessionId) return;
+  try {
+    await fetch(`${API}/api/conversations/summarize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, sessionId })
+    });
+    console.log('[📝 Summary triggered] session:', sessionId);
   } catch (e) {
     // 静默失败
   }
 }
 
 export function useChatAgent({ userId, context, initialMessage }) {
-  const defaultMessage = { role: 'agent', text: initialMessage || "Hi! I'm your AI Food Expert. Tell me what you're craving!" };
+  const defaultMessage = {
+    role: 'agent',
+    text: initialMessage || "Hi! I'm your AI Food Expert. Tell me what you're craving!"
+  };
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -36,7 +45,6 @@ export function useChatAgent({ userId, context, initialMessage }) {
   const [isTyping, setIsTyping] = useState(false);
   const [messages, setMessages] = useState([defaultMessage]);
 
-  // ✅ 每次组件挂载生成新 sessionId
   const sessionIdRef = useRef(generateSessionId(userId || 'guest'));
 
   const handleImageUpload = (e) => {
@@ -65,13 +73,7 @@ export function useChatAgent({ userId, context, initialMessage }) {
       const response = await fetch(`${API}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          sessionId,
-          message: userMessageText,
-          context,
-          image: imageToSend
-        })
+        body: JSON.stringify({ userId, sessionId, message: userMessageText, context, image: imageToSend })
       });
 
       if (!response.ok) throw new Error("Server error");
@@ -93,15 +95,21 @@ export function useChatAgent({ userId, context, initialMessage }) {
           return updated;
         });
       }
-
     } catch {
       setMessages(prev => [...prev, { role: 'agent', text: "Backend connection failed. Please ensure Java is running on 8080." }]);
       setIsTyping(false);
     }
   };
 
-  // ✅ 开启新对话：重置消息 + 生成新 sessionId
+  // ✅ 关闭聊天框时触发摘要
+  const handleCloseChatWithSummary = () => {
+    triggerSummary(userId, sessionIdRef.current);
+    setIsChatOpen(false);
+  };
+
+  // ✅ 新建对话时触发摘要，再重置
   const startNewSession = () => {
+    triggerSummary(userId, sessionIdRef.current);
     sessionIdRef.current = generateSessionId(userId || 'guest');
     setMessages([defaultMessage]);
     setChatInput('');
@@ -109,8 +117,9 @@ export function useChatAgent({ userId, context, initialMessage }) {
     setIsTyping(false);
   };
 
-  // ✅ 加载历史会话：替换消息列表 + 切换 sessionId
+  // ✅ 加载历史会话时，先对当前 session 触发摘要
   const loadSession = async (targetSessionId) => {
+    triggerSummary(userId, sessionIdRef.current);
     try {
       const res = await fetch(`${API}/api/conversations/${targetSessionId}`);
       if (!res.ok) return;
@@ -134,6 +143,7 @@ export function useChatAgent({ userId, context, initialMessage }) {
     sessionId: sessionIdRef.current,
     loadSession,
     startNewSession,
+    handleCloseChatWithSummary,  // ✅ 新增，给 ChatWindow 用
     userId,
   };
 }

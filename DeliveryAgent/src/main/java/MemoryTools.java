@@ -1,75 +1,110 @@
+import java.time.LocalDate;
+
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
-import dev.langchain4j.store.embedding.EmbeddingStore;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
+import dev.langchain4j.store.embedding.EmbeddingStore;
 
 public class MemoryTools {
 
     private final EmbeddingStore<TextSegment> embeddingStore;
     private final EmbeddingModel embeddingModel;
 
-    // 构造函数：把我们在 Main.java 里建好的数据库和向量模型传进来
     public MemoryTools(EmbeddingStore<TextSegment> embeddingStore, EmbeddingModel embeddingModel) {
         this.embeddingStore = embeddingStore;
         this.embeddingModel = embeddingModel;
     }
 
     @Tool({
-            "Use this tool ONLY when the user explicitly shares a new food preference, allergy, dietary restriction, or habit.",
-            "Extract the user's ID from the prompt prefix.",
-            "Save the preference clearly and concisely."
+        "Use this tool ONLY when the user explicitly shares a new food preference, allergy, dietary restriction, or habit.",
+        "Extract the user's ID from the prompt prefix.",
+        "Save the preference clearly and concisely."
     })
-    public void saveUserPreference(String userId, String newPreference) {
-        String memoryText = "User Profile [ID: " + userId + "]: " + newPreference;
+    public void saveUserPreference(
+            @P("The user's ID") String userId,
+            @P("The new preference, e.g. 'dislikes spicy food' or 'is vegetarian'") String newPreference
+    ) {
+        String today = LocalDate.now().toString();
+        // ✅ 方案A：加时间戳，让 agent 知道哪条最新
+        String memoryText = "User Profile [ID: " + userId + "] [Updated: " + today + "]: " + newPreference;
+        var newEmbedding = embeddingModel.embed(memoryText).content();
 
-        // 存之前先查有没有语义相似的记忆
-        var embedding = embeddingModel.embed(memoryText).content();
-        var existing = embeddingStore.search(
-                dev.langchain4j.store.embedding.EmbeddingSearchRequest.builder()
-                        .queryEmbedding(embedding)
-                        .maxResults(1)
-                        .minScore(0.92)   // 相似度很高才认为是重复
-                        .build()
+        // ✅ 方案B：检测冲突
+        // 用新偏好内容搜索，找语义相近的旧记忆
+        var conflictSearch = embeddingStore.search(
+            EmbeddingSearchRequest.builder()
+                .queryEmbedding(newEmbedding)
+                .maxResults(3)
+                .minScore(0.80)  // 0.80 能捞到"loves spicy" vs "dislikes spicy"这类反义冲突
+                .build()
         );
 
-        if (!existing.matches().isEmpty()) {
-            String found = existing.matches().get(0).embedded().text();
-            System.out.println("⚠️ [MEMORY SKIP] Too similar to existing, skipping save.");
-            System.out.println("   Existing: " + found);
-            System.out.println("   New:      " + memoryText);
-            return;  // 不存了
+        boolean foundConflict = false;
+        for (var match : conflictSearch.matches()) {
+            String existingText = match.embedded().text();
+
+            // 只处理同一用户的记忆
+            if (!existingText.contains("[ID: " + userId + "]")) continue;
+
+            // 完全重复（相似度 > 0.92）→ 跳过，不存
+            if (match.score() > 0.92) {
+                System.out.println("⚠️ [MEMORY SKIP] Duplicate detected, skipping.");
+                System.out.println("   Existing: " + existingText);
+                return;
+            }
+
+            // 相似但不完全重复（0.80~0.92）→ 可能是冲突，删旧存新
+            // 例如 "loves spicy" 和 "dislikes spicy" 相似度约 0.83
+            System.out.println("🔄 [MEMORY CONFLICT] Found conflicting preference, replacing:");
+            System.out.println("   Old: " + existingText);
+            System.out.println("   New: " + memoryText);
+
+            // 删除旧记忆（通过 ID 删除）
+            embeddingStore.remove(match.embeddingId());
+            foundConflict = true;
         }
 
-        embeddingStore.add(embedding, TextSegment.from(memoryText));
-        System.out.println("🤖 [MEMORY SAVED] " + memoryText);
+        // 存新记忆
+        embeddingStore.add(newEmbedding, TextSegment.from(memoryText));
+        if (foundConflict) {
+            System.out.println("✅ [MEMORY UPDATED] Replaced old preference with new one: " + memoryText);
+        } else {
+            System.out.println("🤖 [MEMORY SAVED] " + memoryText);
+        }
     }
 
     @Tool({
-            "Use this tool to retrieve the full preference profile of a user.",
-            "Call this at the START of a conversation or when making personalized recommendations.",
-            "Input the user's ID extracted from the prompt prefix."
+        "Use this tool to retrieve the full preference profile of a user.",
+        "Call this at the START of a conversation or when making personalized recommendations.",
+        "Input the user's ID."
     })
-    public String getUserProfile(String userId) {
+    public String getUserProfile(
+            @P("The user's ID") String userId
+    ) {
         System.out.println("🔍 [TOOL TRIGGERED] Fetching profile for: " + userId);
 
         try {
-            // 用用户ID作为查询，检索所有相关记忆
             String query = "User Profile [ID: " + userId + "]";
             var embedding = embeddingModel.embed(query).content();
 
             var results = embeddingStore.search(
-                    dev.langchain4j.store.embedding.EmbeddingSearchRequest.builder()
-                            .queryEmbedding(embedding)
-                            .maxResults(10)      // 最多拉10条记忆
-                            .minScore(0.5)       // 稍微放宽阈值，确保捞全
-                            .build()
+                EmbeddingSearchRequest.builder()
+                    .queryEmbedding(embedding)
+                    .maxResults(10)
+                    .minScore(0.5)
+                    .build()
             );
 
             if (results.matches().isEmpty()) {
                 return "No profile found for user: " + userId;
             }
 
-            StringBuilder profile = new StringBuilder("User Profile for [" + userId + "]:\n");
+            // ✅ 方案A：返回时提示 agent 优先信最新的
+            StringBuilder profile = new StringBuilder(
+                "User Profile for [" + userId + "] (IMPORTANT: if there are conflicting preferences, trust the one with the most recent [Updated: date]):\n"
+            );
             for (var match : results.matches()) {
                 profile.append("- ").append(match.embedded().text()).append("\n");
             }

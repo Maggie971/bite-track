@@ -27,9 +27,6 @@ public class ImageAnalysisService {
         this.mapper = new ObjectMapper();
     }
 
-    // ─────────────────────────────────────────────
-    // Gemini Vision：分析食物图片，返回完整营养分析文本
-    // ─────────────────────────────────────────────
     public String analyzeFood(String base64Image, String mediaType) {
         try {
             String prompt = "You are a professional nutritionist analyzing a food photo. Please provide:\\n" +
@@ -62,9 +59,6 @@ public class ImageAnalysisService {
         }
     }
 
-    // ─────────────────────────────────────────────
-    // 从分析文本里提取 "Total: XXXX calories" 的数字
-    // ─────────────────────────────────────────────
     public int extractTotalCalories(String analysisText) {
         try {
             String lower = analysisText.toLowerCase();
@@ -77,7 +71,7 @@ public class ImageAnalysisService {
             for (int i = idx; i < Math.min(idx + 60, lower.length()); i++) {
                 char c = lower.charAt(i);
                 if (Character.isDigit(c)) { numStr.append(c); foundDigit = true; }
-                else if (foundDigit && c == ',') { /* skip thousands separator */ }
+                else if (foundDigit && c == ',') { }
                 else if (foundDigit) break;
             }
             if (numStr.length() > 0) {
@@ -91,10 +85,6 @@ public class ImageAnalysisService {
         return 0;
     }
 
-    // ─────────────────────────────────────────────
-    // 用 Gemini 给对话生成简短标题（5个词以内）
-    // 在第一轮对话结束后调用一次
-    // ─────────────────────────────────────────────
     public String generateSessionTitle(String userMessage, String agentReply) {
         try {
             String prompt = "Based on this conversation snippet, generate a very short title (5 words max, no quotes, no punctuation):\\n" +
@@ -113,13 +103,42 @@ public class ImageAnalysisService {
                 String title = root.path("candidates").get(0)
                         .path("content").path("parts").get(0)
                         .path("text").asText("").trim();
-                // 最多50个字符
                 return title.length() > 50 ? title.substring(0, 50) : title;
             }
         } catch (Exception e) {
             System.err.println("[TITLE ERROR] " + e.getMessage());
-            // 生成失败就截取用户消息前30个字
             return userMessage.length() > 30 ? userMessage.substring(0, 30) + "..." : userMessage;
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // ✅ 新增：生成对话摘要，存入向量库用于长期记忆
+    // 提取用户的行为、偏好、关注点，2-3句话
+    // ─────────────────────────────────────────────
+    public String generateConversationSummary(String userId, String conversationText) {
+        try {
+            String prompt = "Summarize this food-related conversation in 2-3 sentences. " +
+                    "Focus on: what the user was looking for, any preferences expressed, " +
+                    "restaurants or foods discussed, and calorie/health goals mentioned. " +
+                    "Write in third person, past tense. Be concise and factual.\\n\\n" +
+                    "Conversation:\\n" + conversationText.replace("\"", "\\\"").replace("\n", "\\n");
+
+            String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
+
+            Request request = new Request.Builder()
+                    .url(GEMINI_URL + GEMINI_API_KEY)
+                    .post(RequestBody.create(requestBody, MediaType.get("application/json")))
+                    .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                JsonNode root = mapper.readTree(response.body().string());
+                return root.path("candidates").get(0)
+                        .path("content").path("parts").get(0)
+                        .path("text").asText("").trim();
+            }
+        } catch (Exception e) {
+            System.err.println("[SUMMARY ERROR] " + e.getMessage());
+            return "";
         }
     }
 }

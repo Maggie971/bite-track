@@ -22,15 +22,11 @@ public class ConversationService {
         return LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
     }
 
-    // ─────────────────────────────────────────────
-    // 存一条消息，如果 session 不存在就自动创建
-    // ─────────────────────────────────────────────
     public void saveMessage(String userId, String sessionId, String role, String text, String timestamp) {
         if (userId == null || userId.equals("guest") || text == null || text.isBlank()) return;
 
         String ts = (timestamp != null && !timestamp.isBlank()) ? timestamp : now();
 
-        // 如果 session 不存在，创建一个，标题先用占位符，后面 updateTitle 会更新
         Document existing = conversationsCollection.find(Filters.eq("sessionId", sessionId)).first();
         if (existing == null) {
             Document session = new Document()
@@ -39,11 +35,11 @@ public class ConversationService {
                     .append("title", "New conversation")
                     .append("createdAt", ts)
                     .append("updatedAt", ts)
+                    .append("summarized", false)   // ✅ 新增：标记是否已生成摘要
                     .append("messages", new ArrayList<>());
             conversationsCollection.insertOne(session);
         }
 
-        // push 消息进数组
         conversationsCollection.updateOne(
                 Filters.eq("sessionId", sessionId),
                 new Document("$push", new Document("messages", new Document()
@@ -53,7 +49,6 @@ public class ConversationService {
                 ))
         );
 
-        // 更新 updatedAt
         conversationsCollection.updateOne(
                 Filters.eq("sessionId", sessionId),
                 new Document("$set", new Document("updatedAt", ts))
@@ -62,9 +57,6 @@ public class ConversationService {
         System.out.println("[CONV] Saved [" + role + "] to session: " + sessionId);
     }
 
-    // ─────────────────────────────────────────────
-    // 更新会话标题（由 Gemini 生成后调用）
-    // ─────────────────────────────────────────────
     public void updateTitle(String sessionId, String title) {
         if (title == null || title.isBlank()) return;
         conversationsCollection.updateOne(
@@ -74,9 +66,6 @@ public class ConversationService {
         System.out.println("[CONV] Updated title for " + sessionId + ": " + title);
     }
 
-    // ─────────────────────────────────────────────
-    // 查询某个 session 是否已经有标题（避免重复生成）
-    // ─────────────────────────────────────────────
     public boolean hasCustomTitle(String sessionId) {
         Document doc = conversationsCollection.find(Filters.eq("sessionId", sessionId)).first();
         if (doc == null) return false;
@@ -85,8 +74,62 @@ public class ConversationService {
     }
 
     // ─────────────────────────────────────────────
-    // 获取用户所有会话列表（只返回元数据，不返回消息内容）
+    // ✅ 新增：检查这个 session 是否已经生成过摘要
     // ─────────────────────────────────────────────
+    public boolean hasSummary(String sessionId) {
+        Document doc = conversationsCollection.find(Filters.eq("sessionId", sessionId)).first();
+        if (doc == null) return false;
+        Boolean summarized = doc.getBoolean("summarized");
+        return Boolean.TRUE.equals(summarized);
+    }
+
+    // ─────────────────────────────────────────────
+    // ✅ 新增：标记这个 session 已生成摘要
+    // ─────────────────────────────────────────────
+    public void markSummarized(String sessionId) {
+        conversationsCollection.updateOne(
+                Filters.eq("sessionId", sessionId),
+                new Document("$set", new Document("summarized", true))
+        );
+        System.out.println("[CONV] Marked session as summarized: " + sessionId);
+    }
+
+    // ─────────────────────────────────────────────
+    // ✅ 新增：拿到这个 session 的所有消息，用于生成摘要
+    // 只返回 user 和 agent 的文字内容，拼成对话文本
+    // ─────────────────────────────────────────────
+    public String getConversationText(String sessionId) {
+        Document doc = conversationsCollection.find(Filters.eq("sessionId", sessionId)).first();
+        if (doc == null) return "";
+
+        List<Document> messages = doc.getList("messages", Document.class);
+        if (messages == null || messages.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        for (Document msg : messages) {
+            String role = msg.getString("role");
+            String text = msg.getString("text");
+            if (text == null || text.isBlank()) continue;
+            // 截取每条消息前200字，避免 prompt 太长
+            String truncated = text.length() > 200 ? text.substring(0, 200) + "..." : text;
+            sb.append(role.equals("user") ? "User: " : "Agent: ")
+              .append(truncated).append("\n");
+        }
+        return sb.toString();
+    }
+
+    // ─────────────────────────────────────────────
+    // ✅ 新增：检查 session 是否有至少一条用户消息
+    // 空对话不需要生成摘要
+    // ─────────────────────────────────────────────
+    public boolean hasUserMessages(String sessionId) {
+        Document doc = conversationsCollection.find(Filters.eq("sessionId", sessionId)).first();
+        if (doc == null) return false;
+        List<Document> messages = doc.getList("messages", Document.class);
+        if (messages == null) return false;
+        return messages.stream().anyMatch(m -> "user".equals(m.getString("role")));
+    }
+
     public List<Map<String, String>> getSessionList(String userId, int limit) {
         var sessions = conversationsCollection.find(
                 Filters.eq("userId", userId)
@@ -103,9 +146,6 @@ public class ConversationService {
         return results;
     }
 
-    // ─────────────────────────────────────────────
-    // 获取某次会话的完整消息
-    // ─────────────────────────────────────────────
     public List<Map<String, String>> getMessages(String sessionId) {
         Document doc = conversationsCollection.find(Filters.eq("sessionId", sessionId)).first();
         if (doc == null) return List.of();

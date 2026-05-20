@@ -15,6 +15,7 @@ export default function ChatWindow({
   userId,
   loadSession,
   startNewSession,
+  handleCloseChatWithSummary,
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
@@ -96,7 +97,7 @@ export default function ChatWindow({
               <span className="text-xl">✨</span>
             )}
             <span className="font-bold text-sm">
-              {showHistory ? 'Chat History' : 'FoodAgent Expert'}
+              {showHistory ? 'Chat History' : 'BiteTrack Expert'}
             </span>
           </div>
 
@@ -126,7 +127,7 @@ export default function ChatWindow({
             {/* 关闭按钮 */}
             <button
               onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => setIsChatOpen(false)}
+              onClick={handleCloseChatWithSummary}
               className="hover:bg-blue-700 p-1 rounded-md transition-colors cursor-pointer"
             >
               <X size={18} />
@@ -166,7 +167,7 @@ export default function ChatWindow({
         ) : (
           <>
             {/* 消息体 */}
-            <div className="flex-grow p-4 overflow-y-auto bg-gray-50 flex flex-col space-y-4 text-sm">
+            <div className="flex-grow p-4 overflow-y-auto bg-gray-50 flex flex-col space-y-4 text-base">
               {messages.map((msg, index) => (
                 <div
                   key={index}
