@@ -36,6 +36,7 @@ public class ConversationService {
                     .append("createdAt", ts)
                     .append("updatedAt", ts)
                     .append("summarized", false)   // ✅ 新增：标记是否已生成摘要
+                    .append("hidden", false)
                     .append("messages", new ArrayList<>());
             conversationsCollection.insertOne(session);
         }
@@ -132,7 +133,10 @@ public class ConversationService {
 
     public List<Map<String, String>> getSessionList(String userId, int limit) {
         var sessions = conversationsCollection.find(
-                Filters.eq("userId", userId)
+            Filters.and(
+                Filters.eq("userId", userId),
+                Filters.ne("hidden", true)
+        )
         ).sort(Sorts.descending("updatedAt")).limit(limit);
 
         List<Map<String, String>> results = new ArrayList<>();

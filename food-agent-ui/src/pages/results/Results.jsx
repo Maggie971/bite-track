@@ -20,7 +20,7 @@ export default function Results() {
 
   const chat = useChatAgent({
     userId: isSignedIn ? user?.id : "guest",
-    context: selectedRestaurant?.displayName?.text || location,
+    context: selectedRestaurant?.displayName?.text || '',
     initialMessage: "Hi there! I'm your AI Food Expert. You can type questions or upload a photo of food to let me analyze it!"
   });
 
@@ -62,6 +62,9 @@ export default function Results() {
         loadSession={chat.loadSession}
         startNewSession={chat.startNewSession}
         handleCloseChatWithSummary={chat.handleCloseChatWithSummary}
+        userLocation={chat.userLocation}
+        setUserLocation={chat.setUserLocation}
+        saveLocation={chat.saveLocation}
       />
       <ChatFab isChatOpen={chat.isChatOpen} setIsChatOpen={chat.setIsChatOpen} />
     </div>

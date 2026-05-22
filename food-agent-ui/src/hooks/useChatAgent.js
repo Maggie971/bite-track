@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 
-const API = 'http://localhost:8080';
+const API = 'import.meta.env.VITE_API_URL';
 
 function generateSessionId(userId) {
   const ts = Date.now();
@@ -44,8 +44,20 @@ export function useChatAgent({ userId, context, initialMessage }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
   const [messages, setMessages] = useState([defaultMessage]);
+  const [userLocation, setUserLocation] = useState('');
 
   const sessionIdRef = useRef(generateSessionId(userId || 'guest'));
+
+  const saveLocation = async (location) => {
+    if (!userId || userId === 'guest' || !location) return;
+    try {
+      await fetch(`${API}/api/location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, location })
+      });
+    } catch (e) {}
+  };
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
@@ -73,7 +85,7 @@ export function useChatAgent({ userId, context, initialMessage }) {
       const response = await fetch(`${API}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, sessionId, message: userMessageText, context, image: imageToSend })
+        body: JSON.stringify({ userId, sessionId, message: userMessageText, context: userLocation, image: imageToSend })
       });
 
       if (!response.ok) throw new Error("Server error");
@@ -145,5 +157,7 @@ export function useChatAgent({ userId, context, initialMessage }) {
     startNewSession,
     handleCloseChatWithSummary,  // ✅ 新增，给 ChatWindow 用
     userId,
+    userLocation, setUserLocation,
+    saveLocation, 
   };
 }

@@ -15,7 +15,7 @@ export default function Landing() {
 
   const chat = useChatAgent({
     userId: isSignedIn ? user?.id : "guest",
-    context: location || "Walnut Creek general area",
+    context: '',
     initialMessage: "Hi! I'm your AI Food Expert. Tell me what you're craving, or upload a photo, and I'll tell you where to find it nearby!"
   });
 
@@ -85,6 +85,9 @@ export default function Landing() {
         loadSession={chat.loadSession}
         startNewSession={chat.startNewSession}
         handleCloseChatWithSummary={chat.handleCloseChatWithSummary}
+        userLocation={chat.userLocation}
+        setUserLocation={chat.setUserLocation}
+        saveLocation={chat.saveLocation}
       />
       <ChatFab isChatOpen={chat.isChatOpen} setIsChatOpen={chat.setIsChatOpen} />
     </div>

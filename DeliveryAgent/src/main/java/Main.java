@@ -1,9 +1,7 @@
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.bson.Document;
 
@@ -16,10 +14,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 
-import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -31,122 +26,104 @@ import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
+import io.github.cdimascio.dotenv.Dotenv;
 import io.javalin.Javalin;
 
 public class Main {
 
-    private static final String GEMINI_API_KEY = "AIzaSyA90FLcOCQBApw967TLNTbzxWPiVBCi13I";
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final Map<String, ChatMemory> userChatMemories = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
-        System.out.println("Initializing FoodAgent Multi-Agent System...");
+        Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("America/Los_Angeles"));
+        System.out.println("Initializing BiteTrack Multi-Agent System...");
 
-        // ─────────────────────────────────────────────
+        String GEMINI_API_KEY = dotenv.get("GEMINI_API_KEY");
+        String MONGODB_URI = dotenv.get("MONGODB_URI");
+
         // 1. Models
-        // ─────────────────────────────────────────────
         StreamingChatLanguageModel streamingModel = GoogleAiGeminiStreamingChatModel.builder()
                 .apiKey(GEMINI_API_KEY).modelName("gemini-2.5-flash").build();
-
         ChatLanguageModel syncModel = GoogleAiGeminiChatModel.builder()
                 .apiKey(GEMINI_API_KEY).modelName("gemini-2.5-flash").build();
 
-        // ─────────────────────────────────────────────
         // 2. MongoDB
-        // ─────────────────────────────────────────────
         EmbeddingModel embeddingModel = new BgeSmallEnV15QuantizedEmbeddingModel();
         MongoClient mongoClient = MongoClients.create(
-                "mongodb+srv://maggie917:HHVYHEljjFKkrXud@cluster0.oi5k0vh.mongodb.net/?appName=Cluster0"
-        );
+                "mongodb+srv://maggie917:HHVYHEljjFKkrXud@cluster0.oi5k0vh.mongodb.net/?appName=Cluster0");
         MongoDatabase mongoDatabase = mongoClient.getDatabase("food_agent_db");
 
+        // ✅ 偏好库：只存 User Profile + Calorie Goal
         EmbeddingStore<TextSegment> embeddingStore = MongoDbEmbeddingStore.builder()
-                .fromClient(mongoClient)
-                .databaseName("food_agent_db")
-                .collectionName("user_memories")
-                .indexName("vector_index")
-                .build();
+                .fromClient(mongoClient).databaseName("food_agent_db")
+                .collectionName("user_memories").indexName("vector_index").build();
 
+        // ✅ 摘要库：只存 Conversation Summary，完全隔离
+        EmbeddingStore<TextSegment> summaryStore = MongoDbEmbeddingStore.builder()
+                .fromClient(mongoClient).databaseName("food_agent_db")
+                .collectionName("user_summaries").indexName("summary_vector_index").build();
+
+        // RAG 只查偏好库，不混入对话历史
         ContentRetriever contentRetriever = EmbeddingStoreContentRetriever.builder()
-                .embeddingStore(embeddingStore)
-                .embeddingModel(embeddingModel)
-                .maxResults(3).minScore(0.6)
-                .build();
+                .embeddingStore(embeddingStore).embeddingModel(embeddingModel)
+                .maxResults(3).minScore(0.75).build();
 
-        // ─────────────────────────────────────────────
         // 3. Services
-        // ─────────────────────────────────────────────
         ConversationService conversationService = new ConversationService(
-                mongoDatabase.getCollection("conversations")
-        );
+                mongoDatabase.getCollection("conversations"));
         ImageAnalysisService imageService = new ImageAnalysisService();
 
-        // ─────────────────────────────────────────────
         // 4. Tools
-        // ─────────────────────────────────────────────
         FoodDeliveryTools foodTools = new FoodDeliveryTools();
-        MemoryTools memoryTools = new MemoryTools(embeddingStore, embeddingModel);
+        // ✅ MemoryTools 现在接收两个 store：偏好库 + 摘要库
+        MemoryTools memoryTools = new MemoryTools(embeddingStore, summaryStore, embeddingModel);
         FootprintTools footprintTools = new FootprintTools(embeddingStore, embeddingModel, mongoDatabase);
         NutritionTools nutritionTools = new NutritionTools();
 
-        // ─────────────────────────────────────────────
         // 5. Sub-Agents
-        // ─────────────────────────────────────────────
         SearchAgent searchAgent = AiServices.builder(SearchAgent.class)
                 .chatLanguageModel(syncModel).tools(foodTools).build();
-
         NutritionAgent nutritionAgent = AiServices.builder(NutritionAgent.class)
                 .chatLanguageModel(syncModel).tools(nutritionTools, footprintTools).build();
-
         MemoryAgent memoryAgent = AiServices.builder(MemoryAgent.class)
-                .chatLanguageModel(syncModel)
-                .tools(memoryTools, footprintTools)
-                .contentRetriever(contentRetriever)
-                .build();
+                .chatLanguageModel(syncModel).tools(memoryTools, footprintTools)
+                .contentRetriever(contentRetriever).build();
 
         AgentTools agentTools = new AgentTools(searchAgent, nutritionAgent, memoryAgent);
-        System.out.println("✅ Multi-Agent system ready: Orchestrator + SearchAgent + NutritionAgent + MemoryAgent");
+        System.out.println("✅ Multi-Agent system ready.");
 
-        // ─────────────────────────────────────────────
-        // 6. Server
-        // ─────────────────────────────────────────────
+        // 6. Chat handler
+        ChatHandler chatHandler = new ChatHandler(
+                streamingModel, syncModel, agentTools, footprintTools,
+                imageService, conversationService, embeddingStore, contentRetriever);
+
+        // 7. Server + Routes
         Javalin app = Javalin.create(config -> {
             config.bundledPlugins.enableCors(cors -> cors.addRule(it -> it.anyHost()));
             config.http.maxRequestSize = 10_000_000L;
         }).start(8080);
         System.out.println("Server started on http://localhost:8080");
 
-        // ─────────────────────────────────────────────
-        // 7. Routes
-        // ─────────────────────────────────────────────
-
-        // 足迹：存
         app.post("/api/footprint", ctx -> {
             try {
                 JsonNode json = mapper.readTree(ctx.body());
-                footprintTools.saveFootprint(
-                        json.get("userId").asText(),
-                        json.get("type").asText(),
-                        json.get("content").asText()
-                );
+                footprintTools.saveFootprint(json.get("userId").asText(),
+                        json.get("type").asText(), json.get("content").asText());
                 ctx.result("ok");
             } catch (Exception e) { ctx.status(500).result("error"); }
         });
 
-        // 足迹：搜索历史下拉
         app.get("/api/footprint/history", ctx -> {
             try {
                 String userId = ctx.queryParam("userId");
                 String type = ctx.queryParam("type");
                 int limit = Integer.parseInt(ctx.queryParamAsClass("limit", String.class).getOrDefault("5"));
                 if (userId == null || userId.isBlank()) { ctx.json(List.of()); return; }
-
-                MongoCollection<Document> historyCollection = mongoDatabase.getCollection("user_history");
-                var records = historyCollection.find(Filters.and(
+                MongoCollection<Document> h = mongoDatabase.getCollection("user_history");
+                var records = h.find(Filters.and(
                         Filters.eq("userId", userId),
                         Filters.eq("type", type != null ? type : "search")
                 )).sort(Sorts.descending("timestamp")).limit(limit);
-
                 List<String> results = new ArrayList<>();
                 for (Document doc : records) {
                     String c = doc.getString("content");
@@ -156,22 +133,17 @@ public class Main {
             } catch (Exception e) { ctx.json(List.of()); }
         });
 
-        // 对话：存一条消息
         app.post("/api/conversations/message", ctx -> {
             try {
                 JsonNode json = mapper.readTree(ctx.body());
                 conversationService.saveMessage(
-                        json.get("userId").asText(),
-                        json.get("sessionId").asText(),
-                        json.get("role").asText(),
-                        json.get("text").asText(),
-                        json.has("timestamp") ? json.get("timestamp").asText() : null
-                );
+                        json.get("userId").asText(), json.get("sessionId").asText(),
+                        json.get("role").asText(), json.get("text").asText(),
+                        json.has("timestamp") ? json.get("timestamp").asText() : null);
                 ctx.result("ok");
             } catch (Exception e) { ctx.status(500).result("error"); }
         });
 
-        // 对话：会话列表
         app.get("/api/conversations", ctx -> {
             try {
                 String userId = ctx.queryParam("userId");
@@ -180,11 +152,19 @@ public class Main {
             } catch (Exception e) { ctx.json(List.of()); }
         });
 
-        // 对话：某次会话完整消息
         app.get("/api/conversations/{sessionId}", ctx -> {
             try {
                 ctx.json(conversationService.getMessages(ctx.pathParam("sessionId")));
             } catch (Exception e) { ctx.json(List.of()); }
+        });
+
+        app.delete("/api/conversations/{sessionId}", ctx -> {
+            try {
+                mongoDatabase.getCollection("conversations").updateOne(
+                        Filters.eq("sessionId", ctx.pathParam("sessionId")),
+                        new Document("$set", new Document("hidden", true)));
+                ctx.result("ok");
+            } catch (Exception e) { ctx.status(500).result("error"); }
         });
 
         app.post("/api/conversations/summarize", ctx -> {
@@ -192,149 +172,39 @@ public class Main {
                 JsonNode json = mapper.readTree(ctx.body());
                 String userId = json.get("userId").asText();
                 String sessionId = json.get("sessionId").asText();
-        
-                // 跳过条件：guest、没有用户消息、已经生成过摘要
                 if (userId.equals("guest")
                         || !conversationService.hasUserMessages(sessionId)
                         || conversationService.hasSummary(sessionId)) {
-                    ctx.result("skipped");
-                    return;
+                    ctx.result("skipped"); return;
                 }
-        
-                // 异步生成摘要，不阻塞响应
                 ctx.result("ok");
                 CompletableFuture.runAsync(() -> {
                     try {
                         String convText = conversationService.getConversationText(sessionId);
                         if (convText.isBlank()) return;
-        
-                        // 用 ImageAnalysisService 里的 Gemini 同步调用生成摘要
                         String summary = imageService.generateConversationSummary(userId, convText);
                         if (summary == null || summary.isBlank()) return;
-        
-                        // 存进向量库，RAG 下次检索时能捞到
                         String memoryText = "Conversation Summary [ID: " + userId + "] ["
                                 + LocalDateTime.now().toLocalDate() + "]: " + summary;
                         var embedding = embeddingModel.embed(memoryText).content();
-                        embeddingStore.add(embedding, TextSegment.from(memoryText));
-        
-                        // 标记已摘要
+                        // ✅ 摘要存进 summaryStore，不再混入偏好库
+                        summaryStore.add(embedding, TextSegment.from(memoryText));
                         conversationService.markSummarized(sessionId);
-                        System.out.println("📝 [SUMMARY SAVED] " + memoryText);
-                    } catch (Exception e) {
-                        System.err.println("[SUMMARY ERROR] " + e.getMessage());
-                    }
+                        System.out.println("📝 [SUMMARY SAVED to user_summaries] " + memoryText);
+                    } catch (Exception e) { System.err.println("[SUMMARY ERROR] " + e.getMessage()); }
                 });
-            } catch (Exception e) {
-                ctx.status(500).result("error");
-            }
+            } catch (Exception e) { ctx.status(500).result("error"); }
         });
 
-        // 主聊天
-        app.post("/api/chat", ctx -> {
+        app.post("/api/chat", chatHandler::handle);
+        app.post("/api/location", ctx -> {
             try {
-                JsonNode jsonNode = mapper.readTree(ctx.body());
-
-                String userMessageText = jsonNode.get("message").asText();
-                String contextData = jsonNode.has("context") ? jsonNode.get("context").asText() : "";
-                String base64Image = jsonNode.has("image") && !jsonNode.get("image").isNull()
-                        ? jsonNode.get("image").asText() : null;
-                String dynamicUserId = jsonNode.has("userId") ? jsonNode.get("userId").asText() : "guest";
-                String sessionId = jsonNode.has("sessionId") ? jsonNode.get("sessionId").asText()
-                        : dynamicUserId + "_" + LocalDateTime.now().toLocalDate();
-
-                System.out.println("\n[RECEIVED] User [ID: " + dynamicUserId + "] asks: " + userMessageText);
-
-                // 每个用户专属的对话 memory
-                ChatMemory chatMemory = userChatMemories.computeIfAbsent(
-                        dynamicUserId,
-                        id -> MessageWindowChatMemory.withMaxMessages(20)
-                );
-
-                OrchestratorAgent orchestrator = AiServices.builder(OrchestratorAgent.class)
-                        .streamingChatLanguageModel(streamingModel)
-                        .tools(agentTools)
-                        .chatMemory(chatMemory)
-                        .build();
-
-                // 构建 prompt
-                String promptPrefix = "User [ID: " + dynamicUserId + "] asks: ";
-                String finalPrompt;
-
-                if (base64Image != null && !base64Image.isEmpty()) {
-                    String cleanBase64 = base64Image.contains(",") ? base64Image.split(",")[1] : base64Image;
-                    String mediaType = cleanBase64.startsWith("iVBORw0") ? "image/png" : "image/jpeg";
-                    System.out.println("[IMAGE] Analyzing via Gemini Vision...");
-
-                    String nutritionAnalysis = imageService.analyzeFood(cleanBase64, mediaType);
-                    System.out.println("[IMAGE] Analysis complete.");
-
-                    int estimatedCalories = imageService.extractTotalCalories(nutritionAnalysis);
-                    if (estimatedCalories > 0 && !dynamicUserId.equals("guest")) {
-                        footprintTools.saveCalorieRecord(dynamicUserId,
-                                userMessageText.length() > 5 ? "food from photo (" + userMessageText + ")" : "food from uploaded photo",
-                                estimatedCalories);
-                    }
-
-                    finalPrompt = promptPrefix + userMessageText
-                            + "\n\n[VISION ANALYSIS RESULT]:\n" + nutritionAnalysis
-                            + "\n\n[INSTRUCTION]: Call askNutritionAgent with this analysis and userId "
-                            + dynamicUserId + " to present results and check today's calorie budget.";
-                } else {
-                    finalPrompt = promptPrefix + userMessageText + "\nContext Area/Restaurant: " + contextData;
-                }
-
-                ctx.contentType("text/plain; charset=UTF-8");
-                ctx.header("X-Session-Id", sessionId);
-                ctx.header("Access-Control-Expose-Headers", "X-Session-Id");
-
-                CompletableFuture<Void> future = new CompletableFuture<>();
-                ctx.future(() -> future);
-
-                StringBuilder agentReply = new StringBuilder();
-                final String finalUserMsg = userMessageText;
-                final String finalSessionId = sessionId;
-
-                orchestrator.chat(UserMessage.from(finalPrompt))
-                        .onNext(token -> {
-                            try {
-                                agentReply.append(token);
-                                ctx.res().getOutputStream().print(token);
-                                ctx.res().getOutputStream().flush();
-                            } catch (Exception e) { e.printStackTrace(); }
-                        })
-                        .onComplete(response -> {
-                            System.out.println("\n[INFO] Orchestrator finished. Memory: "
-                                    + chatMemory.messages().size() + " messages");
-
-                            // 存消息到 DB（异步，不阻塞响应）
-                            CompletableFuture.runAsync(() -> {
-                                String replyText = agentReply.toString();
-                                conversationService.saveMessage(dynamicUserId, finalSessionId, "user", finalUserMsg, null);
-                                conversationService.saveMessage(dynamicUserId, finalSessionId, "agent", replyText, null);
-
-                                // 只在第一轮对话时生成标题
-                                if (!conversationService.hasCustomTitle(finalSessionId)) {
-                                    String title = imageService.generateSessionTitle(finalUserMsg, replyText);
-                                    conversationService.updateTitle(finalSessionId, title);
-                                }
-                            });
-
-                            future.complete(null);
-                        })
-                        .onError(error -> {
-                            System.err.println("Streaming Error: " + error.getMessage());
-                            future.completeExceptionally(error);
-                        })
-                        .start();
-
-            } catch (Exception e) {
-                System.err.println("Error: " + e.getMessage());
-                e.printStackTrace();
-                ctx.status(500).result("Error!");
-            }
+                JsonNode json = mapper.readTree(ctx.body());
+                String userId = json.get("userId").asText();
+                String location = json.get("location").asText();
+                footprintTools.saveUserLocation(userId, location);
+                ctx.result("ok");
+            } catch (Exception e) { ctx.status(500).result("error"); }
         });
-
-        
     }
 }

@@ -1,18 +1,28 @@
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
-import okhttp3.*;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import dev.langchain4j.agent.tool.P;
+import dev.langchain4j.agent.tool.Tool;
+import io.github.cdimascio.dotenv.Dotenv;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+
 public class NutritionTools {
 
-    private static final String USDA_API_KEY = "HvpxoMgztANAa0pVlN2fNbeXNptSgfLWrB4aqof7";
+    private final String USDA_API_KEY;
     private static final String USDA_BASE_URL = "https://api.nal.usda.gov/fdc/v1";
     private final OkHttpClient client = new OkHttpClient();
     private final ObjectMapper mapper = new ObjectMapper();
+
+    public NutritionTools() {
+    Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+    this.USDA_API_KEY = dotenv.get("USDA_API_KEY");
+}
 
     // 用于用户直接文字询问热量的情况，e.g. "how many calories in ramen?"
     @Tool({

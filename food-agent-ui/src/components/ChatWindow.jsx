@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Rnd } from 'react-rnd';
 import ReactMarkdown from 'react-markdown';
-import { X, ImagePlus, History, ChevronLeft, SquarePen } from 'lucide-react';
+import { X, ImagePlus, History, ChevronLeft, SquarePen, Trash2, MapPin } from 'lucide-react';
 
-const API = 'http://localhost:8080';
+
+const API = 'import.meta.env.VITE_API_URL';
 
 export default function ChatWindow({
   isChatOpen, setIsChatOpen,
@@ -16,11 +17,15 @@ export default function ChatWindow({
   loadSession,
   startNewSession,
   handleCloseChatWithSummary,
+  userLocation, setUserLocation,
+  saveLocation, 
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const messagesEndRef = useRef(null);
+  const [showLocationInput, setShowLocationInput] = useState(false);
+  const [locationInput, setLocationInput] = useState('');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -46,7 +51,17 @@ export default function ChatWindow({
     setShowHistory(false);
   };
 
-  // ✅ 新对话：关闭历史面板 + 重置消息
+  // ✅ 软删除：前端从列表移除，后端标记 hidden=true
+  const handleDeleteSession = async (e, sessionId) => {
+    e.stopPropagation(); // 防止触发 handleSelectSession
+    try {
+      await fetch(`${API}/api/conversations/${sessionId}`, { method: 'DELETE' });
+      setSessions(prev => prev.filter(s => s.sessionId !== sessionId));
+    } catch (err) {
+      console.error('Failed to delete session', err);
+    }
+  };
+
   const handleNewChat = () => {
     startNewSession();
     setShowHistory(false);
@@ -101,8 +116,17 @@ export default function ChatWindow({
             </span>
           </div>
 
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setShowLocationInput(v => !v)}
+            className="hover:bg-blue-700 p-1 rounded-md transition-colors cursor-pointer flex items-center gap-1 text-xs"
+            title="Set location"
+          >
+            <MapPin size={15} />
+            <span className="max-w-[80px] truncate">{userLocation || 'Set location'}</span>
+          </button>
+
           <div className="flex items-center space-x-1">
-            {/* ✅ 新对话按钮 */}
             <button
               onMouseDown={(e) => e.stopPropagation()}
               onClick={handleNewChat}
@@ -112,7 +136,6 @@ export default function ChatWindow({
               <SquarePen size={18} />
             </button>
 
-            {/* 历史按钮 */}
             {!showHistory && (
               <button
                 onMouseDown={(e) => e.stopPropagation()}
@@ -124,7 +147,6 @@ export default function ChatWindow({
               </button>
             )}
 
-            {/* 关闭按钮 */}
             <button
               onMouseDown={(e) => e.stopPropagation()}
               onClick={handleCloseChatWithSummary}
@@ -134,6 +156,58 @@ export default function ChatWindow({
             </button>
           </div>
         </div>
+
+        {showLocationInput && (
+  <div className="bg-blue-700 px-4 py-2 flex items-center gap-2">
+    <input
+      type="text"
+      placeholder="Enter city or zipcode..."
+      className="flex-grow text-sm bg-blue-800 text-white placeholder-blue-300 rounded-lg px-3 py-1.5 focus:outline-none"
+      value={locationInput}
+      onChange={(e) => setLocationInput(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && locationInput.trim()) {
+          setUserLocation(locationInput.trim());
+          saveLocation(locationInput.trim());
+          setShowLocationInput(false);
+          setLocationInput('');
+        }
+      }}
+    />
+    <button
+      onClick={() => {
+        if (locationInput.trim()) {
+          setUserLocation(locationInput.trim());
+          saveLocation(locationInput.trim());
+          setShowLocationInput(false);
+          setLocationInput('');
+        }
+      }}
+      className="text-xs bg-white text-blue-700 font-semibold px-3 py-1.5 rounded-lg hover:bg-blue-50 whitespace-nowrap"
+    >
+      Confirm
+    </button>
+    <button
+      onClick={() => {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            const { latitude, longitude } = pos.coords;
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+            const data = await res.json();
+            const city = data.address.city || data.address.town || data.address.village || 'Unknown';
+            setUserLocation(city);
+            saveLocation(city);
+            setShowLocationInput(false);
+          },
+          () => alert('Location access denied')
+        );
+      }}
+      className="text-xs text-blue-200 hover:text-white whitespace-nowrap"
+    >
+      Use my location
+    </button>
+  </div>
+)}
 
         {/* 历史会话面板 */}
         {showHistory ? (
@@ -148,18 +222,32 @@ export default function ChatWindow({
             ) : (
               <div className="flex flex-col space-y-2">
                 {sessions.map((session) => (
-                  <button
+                  // ✅ 每条会话：左边点击进入，右边删除按钮
+                  <div
                     key={session.sessionId}
-                    onClick={() => handleSelectSession(session.sessionId)}
-                    className="w-full text-left px-4 py-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 transition-all shadow-sm"
+                    className="group flex items-center bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 transition-all shadow-sm"
                   >
-                    <div className="font-medium text-gray-800 text-sm truncate">
-                      {session.title}
-                    </div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      {formatTime(session.updatedAt)}
-                    </div>
-                  </button>
+                    <button
+                      onClick={() => handleSelectSession(session.sessionId)}
+                      className="flex-grow text-left px-4 py-3"
+                    >
+                      <div className="font-medium text-gray-800 text-sm truncate">
+                        {session.title}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {formatTime(session.updatedAt)}
+                      </div>
+                    </button>
+
+                    {/* 删除按钮，hover 时才显示 */}
+                    <button
+                      onClick={(e) => handleDeleteSession(e, session.sessionId)}
+                      className="opacity-0 group-hover:opacity-100 p-2 mr-2 text-gray-300 hover:text-red-400 transition-all rounded-lg"
+                      title="Delete conversation"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

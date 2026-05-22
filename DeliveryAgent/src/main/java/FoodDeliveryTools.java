@@ -1,16 +1,28 @@
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
-import okhttp3.*;
+import java.io.IOException;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
+
+import dev.langchain4j.agent.tool.P;
+import dev.langchain4j.agent.tool.Tool;
+import io.github.cdimascio.dotenv.Dotenv;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 public class FoodDeliveryTools {
 
-    private static final String MAPS_API_KEY = "AIzaSyAnVFyhgwBov2ZRkLAXpSTYpuSC9FqwE5c";
+    private final String MAPS_API_KEY;
+    
     private final OkHttpClient client = new OkHttpClient();
     private final ObjectMapper mapper = new ObjectMapper(); // 新增：Jackson 解析器
 
+    public FoodDeliveryTools() {
+        Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+        this.MAPS_API_KEY = dotenv.get("MAPS_API_KEY");
+    }
     @Tool("Search for a list of restaurants based on user query and location.")
     public String searchRestaurants(
             @P("The food type, e.g., 'milk tea'") String query,

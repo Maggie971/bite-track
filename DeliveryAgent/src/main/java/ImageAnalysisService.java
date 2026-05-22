@@ -3,6 +3,7 @@ import java.util.concurrent.TimeUnit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import io.github.cdimascio.dotenv.Dotenv;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -11,7 +12,7 @@ import okhttp3.Response;
 
 public class ImageAnalysisService {
 
-    private static final String GEMINI_API_KEY = "AIzaSyA90FLcOCQBApw967TLNTbzxWPiVBCi13I";
+    private final String GEMINI_API_KEY;
     private static final String GEMINI_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=";
 
@@ -19,6 +20,8 @@ public class ImageAnalysisService {
     private final ObjectMapper mapper;
 
     public ImageAnalysisService() {
+        Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+        this.GEMINI_API_KEY = dotenv.get("GEMINI_API_KEY");
         this.client = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
