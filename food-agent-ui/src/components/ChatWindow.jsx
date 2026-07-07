@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { X, ImagePlus, History, ChevronLeft, SquarePen, Trash2, MapPin } from 'lucide-react';
 
 
-const API = 'import.meta.env.VITE_API_URL';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 export default function ChatWindow({
   isChatOpen, setIsChatOpen,

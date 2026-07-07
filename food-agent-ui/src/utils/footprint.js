@@ -1,4 +1,4 @@
-const API_BASE = 'import.meta.env.VITE_API_URL';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 // 存足迹（搜索或浏览）— 走独立接口，不经过 agent
 export async function recordFootprint(userId, type, content) {

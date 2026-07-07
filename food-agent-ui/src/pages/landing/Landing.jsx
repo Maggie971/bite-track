@@ -23,7 +23,14 @@ export default function Landing() {
     setIsLocating(true);
     if (!navigator.geolocation) { alert("Geolocation not supported."); setIsLocating(false); return; }
     navigator.geolocation.getCurrentPosition(
-      () => { setTimeout(() => { setLocation("94596"); setIsLocating(false); }, 800); },
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+        const data = await res.json();
+        const city = data.address.city || data.address.town || data.address.village || data.address.county || 'Unknown';
+        setLocation(city);
+        setIsLocating(false);
+      },
       () => { alert("Location access denied."); setIsLocating(false); }
     );
   };

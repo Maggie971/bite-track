@@ -224,6 +224,38 @@ public class FootprintTools {
     }
 
     @Tool({
+        "Use this tool when user says a previously recorded calorie amount was wrong and provides the correct value.",
+        "Triggers: 'strawberry is 140 kcal not 578', 'please correct my X to Y kcal', 'change the calorie for X'.",
+        "This deletes the old record and saves a new one with the correct calories."
+    })
+    public String correctCalorieRecord(
+            @P("The user's ID") String userId,
+            @P("Keyword to identify the meal to correct, e.g. 'strawberry'") String keyword,
+            @P("The correct calories as integer") int correctCalories
+    ) {
+        String dietDay = getDietDay();
+        // 找到包含关键词的记录删掉
+        historyCollection.deleteOne(Filters.and(
+                Filters.eq("userId", userId),
+                Filters.eq("type", "calorie"),
+                Filters.eq("dietDay", dietDay),
+                Filters.regex("content", keyword, "i")
+        ));
+        // 存新的正确记录
+        Document doc = new Document()
+                .append("userId", userId)
+                .append("type", "calorie")
+                .append("content", keyword + " (corrected)")
+                .append("calories", correctCalories)
+                .append("dietDay", dietDay)
+                .append("timestamp", getNowTimestamp());
+        historyCollection.insertOne(doc);
+        System.out.println("✏️ [CALORIE CORRECTED] " + keyword + " → " + correctCalories + " kcal");
+        return "Corrected! " + keyword + " is now recorded as " + correctCalories + " kcal.";
+    }
+
+
+    @Tool({
         "Use this tool to get the user's recent search and restaurant browsing history.",
         "Call this when making personalized recommendations to avoid suggesting places they've already visited.",
         "Also useful when user asks 'what have I been searching for lately'."

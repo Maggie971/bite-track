@@ -43,7 +43,7 @@ public class MemoryTools {
         var conflictSearch = embeddingStore.search(
             EmbeddingSearchRequest.builder()
                 .queryEmbedding(newEmbedding)
-                .maxResults(3).minScore(0.92)
+                .maxResults(3).minScore(0.97)
                 .build()
         );
 
